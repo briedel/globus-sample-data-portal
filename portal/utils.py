@@ -1,5 +1,6 @@
 import os
 import json
+import datetime
 from flask import request, flash, redirect, url_for
 from threading import Lock
 
@@ -83,8 +84,10 @@ def store_tokens(tokens, username):
     outdir = os.path.join("./users/", username, "")
     if not os.path.exists(outdir):
         os.makedirs(outdir)
+    data = tokens.by_resource_server
+    data["timestamp"] = datetime.datetime.now().strftime('%Y-%m-%dT%H:%M:%S')
     with open(os.path.join(outdir, 'token.json'), 'w') as outfile:
-        json.dump(tokens.data, outfile)
+        json.dump(data, outfile)
 
 
 def store_idenities(identities, username):
