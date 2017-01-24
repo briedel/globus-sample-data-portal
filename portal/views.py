@@ -1,19 +1,19 @@
 from flask import (abort, flash, redirect, render_template, request,
                    session, url_for)
 import requests
-
 try:
     from urllib.parse import urlencode
 except:
     from urllib import urlencode
 
 from globus_sdk import (TransferClient, TransferAPIError,
-                        TransferData, RefreshTokenAuthorizer)
+                        TransferData, RefreshTokenAuthorizer,
+                        AuthClient, AccessTokenAuthorizer)
 
 from portal import app, database, datasets
 from portal.decorators import authenticated
 from portal.utils import (load_portal_client, get_portal_tokens,
-                          get_safe_redirect)
+                          get_safe_redirect, get_all_ids)
 
 
 @app.route('/', methods=['GET'])
@@ -119,6 +119,7 @@ def authcallback():
     """Handles the interaction with Globus Auth."""
     # If we're coming back from Globus Auth in an error state, the error
     # will be in the "error" query string parameter.
+    print request
     if 'error' in request.args:
         flash("You could not be logged into the portal: " +
               request.args.get('error_description', request.args['error']))
@@ -128,8 +129,13 @@ def authcallback():
     redirect_uri = url_for('authcallback', _external=True)
 
     client = load_portal_client()
-    client.oauth2_start_flow_authorization_code(redirect_uri,
-                                                refresh_tokens=True)
+    scopes = ['openid', 'profile', 'email',
+              'urn:globus:auth:scope:auth.globus.org:view_identities',
+              'urn:globus:auth:scope:transfer.api.globus.org:all']
+    scope_string = ' '.join(scopes)
+    client.oauth2_start_flow(redirect_uri,
+                             requested_scopes=scope_string,
+                             refresh_tokens=True)
 
     # If there's no "code" query string parameter, we're in this route
     # starting a Globus Auth login flow.
@@ -146,7 +152,6 @@ def authcallback():
         # and can start the process of exchanging an auth code for a token.
         code = request.args.get('code')
         tokens = client.oauth2_exchange_code_for_tokens(code)
-
         id_token = tokens.decode_id_token(client)
         session.update(
             tokens=tokens.by_resource_server,
@@ -157,6 +162,7 @@ def authcallback():
             primary_username=id_token.get('preferred_username'),
             primary_identity=id_token.get('sub'),
         )
+        get_all_ids(tokens)
 
         profile = database.load_profile(session['primary_identity'])
 

@@ -1,4 +1,6 @@
-from flask import request
+import os
+import json
+from flask import request, flash, redirect, url_for
 from threading import Lock
 
 import globus_sdk
@@ -40,7 +42,8 @@ def get_safe_redirect():
 
 
 def get_portal_tokens(
-        scopes=['openid', 'urn:globus:auth:scope:demo-resource-server:all']):
+        scopes=['openid', 'profile',
+                'urn:globus:auth:scope:auth.globus.org:view_identities']):
     """
     Uses the client_credentials grant to get access tokens on the
     Portal's "client identity."
@@ -54,6 +57,7 @@ def get_portal_tokens(
         client = load_portal_client()
         tokens = client.oauth2_client_credentials_tokens(
             requested_scopes=scope_string)
+        print tokens
 
         # walk all resource servers in the token response (includes the
         # top-level server, as found in tokens.resource_server), and store the
@@ -66,9 +70,47 @@ def get_portal_tokens(
                     'expires_at': token_info['expires_at_seconds']
                 }
             })
+            print token_info["scope"]
 
         return get_portal_tokens.access_tokens
 
 
 get_portal_tokens.lock = Lock()
 get_portal_tokens.access_tokens = None
+
+
+def store_tokens(tokens, username):
+    outdir = os.path.join("./users/", username, "")
+    if not os.path.exists(outdir):
+        os.makedirs(outdir)
+    with open(os.path.join(outdir, 'token.json'), 'w') as outfile:
+        json.dump(tokens.data, outfile)
+
+
+def store_idenities(identities, username):
+    outdir = os.path.join("./users/", username, "")
+    if not os.path.exists(outdir):
+        os.makedirs(outdir)
+    with open(os.path.join(outdir, 'identities.json'), "w") as outfile:
+        json.dump(identities.data, outfile)
+
+
+def get_all_ids(tokens, store_token=True, store_ids=True):
+    # Adding this part to get an Auth client that knows about the
+    # token and can access all off the user identities. Somewhat ugly
+    # Globus might fix it
+    auth_client = globus_sdk.AuthClient(
+        authorizer=globus_sdk.AccessTokenAuthorizer(
+            tokens.access_token))
+    all_ids = auth_client.get('/p/whoami')
+    username = None
+    for iden in all_ids.data["identities"]:
+        if iden["username"].endswith("@globusid.org"):
+            username = iden["username"].replace("@globusid.org", "")
+    if username is None:
+        flash("Could not Globus ID username")
+        return redirect(url_for('home'))
+    if store_token:
+        store_tokens(tokens, username)
+    if store_ids:
+        store_idenities(all_ids, username)
